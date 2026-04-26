@@ -1,0 +1,218 @@
+// Prisma Schema for ResumeForge AI Backend
+// Database: Supabase Postgres
+// Auth: Supabase Auth (JWT)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Connection URLs are configured in prisma.config.ts (Prisma v7)
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Tier {
+  FREE
+  PRO
+  CAREER
+  ENTERPRISE
+}
+
+enum CoverLetterTone {
+  PROFESSIONAL
+  CONVERSATIONAL
+  ASSERTIVE
+}
+
+enum ApplicationStatus {
+  APPLIED
+  RECRUITER_SCREEN
+  INTERVIEW
+  FINAL_ROUND
+  OFFER
+  REJECTED
+  ARCHIVED
+}
+
+enum SeniorityLevel {
+  ENTRY
+  MID
+  SENIOR
+  EXECUTIVE
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id        String   @id @default(uuid())
+  // Supabase auth user ID (sub claim in JWT)
+  authId    String   @unique @map("auth_id")
+  email     String   @unique
+  fullName  String?  @map("full_name")
+  avatarUrl String?  @map("avatar_url")
+
+  // Subscription
+  tier      Tier     @default(FREE)
+
+  // Preferences
+  preferences   UserPreferences?
+
+  // Relations
+  baseResumes   BaseResume[]
+  generations   Generation[]
+  applications  Application[]
+  referralsSent Referral[]    @relation("ReferralSender")
+  referredBy    Referral?     @relation("ReferralReceiver")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt      @map("updated_at")
+
+  @@map("users")
+}
+
+model UserPreferences {
+  id                   String          @id @default(uuid())
+  userId               String          @unique @map("user_id")
+  user                 User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Generation defaults
+  defaultTone          CoverLetterTone @default(PROFESSIONAL) @map("default_tone")
+  targetIndustry       String?         @map("target_industry")
+  seniorityLevel       SeniorityLevel  @default(MID) @map("seniority_level")
+  preferredName        String?         @map("preferred_name")
+
+  // Contact info defaults for cover letter/email pre-fill
+  contactEmail         String?         @map("contact_email")
+  contactPhone         String?         @map("contact_phone")
+  linkedinUrl          String?         @map("linkedin_url")
+
+  // Privacy settings
+  resumeStorageEnabled Boolean         @default(true)  @map("resume_storage_enabled")
+  historyRetentionDays Int             @default(90)    @map("history_retention_days")
+  feedbackOptOut       Boolean         @default(false) @map("feedback_opt_out")
+
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("user_preferences")
+}
+
+// Stored base resume versions (Pro: up to 5, Career: up to 10)
+model BaseResume {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  name        String
+  // Extracted text content (encrypted at rest via Supabase)
+  extractedText String  @map("extracted_text") @db.Text
+  // Original file stored in Supabase Storage
+  storageKey  String?  @map("storage_key")
+  fileSize    Int?     @map("file_size")
+  mimeType    String?  @map("mime_type")
+
+  lastUsedAt  DateTime? @map("last_used_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt      @map("updated_at")
+
+  generations Generation[]
+
+  @@map("base_resumes")
+}
+
+// AI-generated application package (resume + cover letter + email)
+model Generation {
+  id             String   @id @default(uuid())
+  userId         String?  @map("user_id")
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  baseResumeId   String?  @map("base_resume_id")
+  baseResume     BaseResume? @relation(fields: [baseResumeId], references: [id], onDelete: SetNull)
+
+  // Input snapshot
+  jobDescription String   @map("job_description") @db.Text
+  resumeText     String   @map("resume_text")     @db.Text
+
+  // JD analysis
+  companyName    String?  @map("company_name")
+  roleTitle      String?  @map("role_title")
+  seniority      String?
+  requiredSkills String[] @map("required_skills")
+  preferredSkills String[] @map("preferred_skills")
+
+  // Generated outputs
+  tailoredResume   Json?   @map("tailored_resume")    // Structured resume JSON
+  coverLetter      String? @map("cover_letter")       @db.Text
+  applicationEmail Json?   @map("application_email")  // { subject, body }
+
+  // Cover letter settings
+  coverLetterTone  CoverLetterTone @default(PROFESSIONAL) @map("cover_letter_tone")
+
+  // ATS score
+  atsScore         Int?    @map("ats_score")
+  matchedKeywords  String[] @map("matched_keywords")
+  missingKeywords  String[] @map("missing_keywords")
+
+  // Storage keys for generated PDFs in Supabase Storage
+  resumePdfKey      String? @map("resume_pdf_key")
+  coverLetterPdfKey String? @map("cover_letter_pdf_key")
+  emailPdfKey       String? @map("email_pdf_key")
+
+  // User feedback
+  resumeRating      Int?   @map("resume_rating")      // 1 = thumbs up, -1 = thumbs down
+  coverLetterRating Int?   @map("cover_letter_rating")
+  emailRating       Int?   @map("email_rating")
+  feedbackNote      String? @map("feedback_note")
+
+  // AI model used
+  modelUsed        String? @map("model_used")
+
+  application      Application?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("generations")
+}
+
+// Application tracker (Career tier)
+model Application {
+  id            String            @id @default(uuid())
+  userId        String            @map("user_id")
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generationId  String?           @unique @map("generation_id")
+  generation    Generation?       @relation(fields: [generationId], references: [id], onDelete: SetNull)
+
+  // Job details
+  companyName   String            @map("company_name")
+  roleTitle     String            @map("role_title")
+  jobUrl        String?           @map("job_url")
+  status        ApplicationStatus @default(APPLIED)
+
+  // Contact
+  recruiterName  String?  @map("recruiter_name")
+  recruiterEmail String?  @map("recruiter_email")
+  lastContactAt  DateTime? @map("last_contact_at")
+
+  // Notes
+  notes          String?  @db.Text
+
+  appliedAt  DateTime  @default(now()) @map("applied_at")
+  updatedAt  DateTime  @updatedAt      @map("updated_at")
+
+  @@map("applications")
+}
+
+// Referral tracking
+model Referral {
+  id          String   @id @default(uuid())
+  senderId    String   @map("sender_id")
+  sender      User     @relation("ReferralSender", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String?  @unique @map("receiver_id")
+  receiver    User?    @relation("ReferralReceiver", fields: [receiverId], references: [id], onDelete: SetNull)
+  code        String   @unique
+  converted   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("referrals")
+}
