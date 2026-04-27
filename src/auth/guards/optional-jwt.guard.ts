@@ -6,7 +6,7 @@ import { AuthGuard } from '@nestjs/passport';
  * but does not reject unauthenticated requests. Used for guest-mode endpoints.
  */
 @Injectable()
-export class OptionalJwtGuard extends AuthGuard('supabase-jwt') {
+export class OptionalJwtGuard extends AuthGuard('jwt') {
   canActivate(context: ExecutionContext) {
     return super.canActivate(context);
   }

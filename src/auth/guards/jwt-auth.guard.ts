@@ -4,7 +4,7 @@ import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 
 @Injectable()
-export class JwtAuthGuard extends AuthGuard('supabase-jwt') {
+export class JwtAuthGuard extends AuthGuard('jwt') {
   constructor(private reflector: Reflector) {
     super();
   }
@@ -24,7 +24,7 @@ export class JwtAuthGuard extends AuthGuard('supabase-jwt') {
 
   handleRequest(err: any, user: any, info: any) {
     if (err || !user) {
-      throw err || new UnauthorizedException('Authentication required. Please provide a valid Supabase JWT token.');
+      throw err || new UnauthorizedException('Authentication required. Please provide a valid JWT token.');
     }
     return user;
   }

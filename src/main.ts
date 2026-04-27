@@ -50,12 +50,11 @@ async function bootstrap() {
     SwaggerModule.setup('api/docs', app, document, {
       swaggerOptions: { persistAuthorization: true },
     });
-
-    console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
   }
 
   await app.listen(port);
   console.log(`🚀 ResumeForge API running on http://localhost:${port}/api/v1`);
+  console.log(`📚 Swagger docs: http://localhost:${port}/api/docs`);
 }
 
 bootstrap();

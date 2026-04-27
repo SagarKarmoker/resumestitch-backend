@@ -67,7 +67,7 @@ export class ResumeController {
         ],
       }),
     )
-    file: Express.Multer.File,
+    file: any,
   ) {
     return this.resumeService.parsePdf(file.buffer);
   }
@@ -91,7 +91,7 @@ export class ResumeController {
         ],
       }),
     )
-    file: Express.Multer.File,
+    file: any,
     @Body() body: SaveResumeDto,
   ) {
     return this.resumeService.saveBaseResume(

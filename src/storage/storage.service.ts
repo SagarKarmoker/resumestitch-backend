@@ -26,17 +26,17 @@ export class StorageService {
   private readonly endpoint: string;
 
   constructor(private readonly config: ConfigService) {
-    this.endpoint = config.get<string>('SUPABASE_S3_ENDPOINT');
-    this.resumesBucket = config.get<string>('SUPABASE_STORAGE_BUCKET_RESUMES', 'resumes');
-    this.outputsBucket = config.get<string>('SUPABASE_STORAGE_BUCKET_OUTPUTS', 'outputs');
+    this.endpoint = config.get<string>('S3_ENDPOINT');
+    this.resumesBucket = config.get<string>('S3_BUCKET_RESUMES', 'resumes');
+    this.outputsBucket = config.get<string>('S3_BUCKET_OUTPUTS', 'outputs');
 
     this.s3Client = new S3Client({
       forcePathStyle: true,
-      region: config.get<string>('SUPABASE_S3_REGION', 'ap-southeast-1'),
+      region: config.get<string>('S3_REGION', 'ap-southeast-1'),
       endpoint: this.endpoint,
       credentials: {
-        accessKeyId: config.get<string>('SUPABASE_S3_ACCESS_KEY_ID'),
-        secretAccessKey: config.get<string>('SUPABASE_S3_SECRET_ACCESS_KEY'),
+        accessKeyId: config.get<string>('S3_ACCESS_KEY_ID'),
+        secretAccessKey: config.get<string>('S3_SECRET_ACCESS_KEY'),
       },
     });
   }

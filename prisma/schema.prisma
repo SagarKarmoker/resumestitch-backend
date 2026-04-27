@@ -49,10 +49,15 @@ enum SeniorityLevel {
 model User {
   id        String   @id @default(uuid())
   // Supabase auth user ID (sub claim in JWT)
-  authId    String   @unique @map("auth_id")
+  authId    String?  @unique @map("auth_id")
   email     String   @unique
+  password  String   @map("password_hash")
   fullName  String?  @map("full_name")
   avatarUrl String?  @map("avatar_url")
+
+  // Password reset
+  resetToken        String?   @map("reset_token")
+  resetTokenExpiry  DateTime? @map("reset_token_expiry")
 
   // Subscription
   tier      Tier     @default(FREE)
