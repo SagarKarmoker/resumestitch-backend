@@ -4,7 +4,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CoverLetterTone, SeniorityLevel, User } from '../generated/prisma';
+import { CoverLetterTone, SeniorityLevel, User } from '@generated/prisma';
 import { UpdatePreferencesDto } from './dto/users.dto';
 
 @Injectable()

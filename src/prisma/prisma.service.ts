@@ -19,6 +19,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get generation() { return this._client.generation; }
   get application() { return this._client.application; }
   get referral() { return this._client.referral; }
+  get productFeedback() { return this._client.productFeedback; }
 
   // Transaction support
   get $transaction() { return this._client.$transaction.bind(this._client); }

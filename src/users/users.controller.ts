@@ -11,11 +11,11 @@ import {
   ParseIntPipe,
   DefaultValuePipe,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { UsersService } from './users.service';
-import { User } from '../generated/prisma';
+import { User } from '@generated/prisma';
 import { UpdatePreferencesDto } from './dto/users.dto';
 
 @ApiTags('users')
@@ -27,12 +27,14 @@ export class UsersController {
 
   @Get('me')
   @ApiOperation({ summary: 'Get current user profile' })
+  @ApiResponse({ status: 200, description: 'User profile', example: { id: 'uuid', email: 'john@example.com', fullName: 'John Doe', tier: 'FREE', createdAt: '2024-01-01T00:00:00Z' } })
   async getProfile(@CurrentUser() user: User) {
     return this.usersService.getProfile(user.id);
   }
 
   @Get('me/preferences')
   @ApiOperation({ summary: 'Get user preferences' })
+  @ApiResponse({ status: 200, description: 'User preferences', example: { defaultTone: 'PROFESSIONAL', targetIndustry: 'Software Engineering', seniorityLevel: 'MID', preferredName: 'John' } })
   async getPreferences(@CurrentUser() user: User) {
     return this.usersService.getPreferences(user.id);
   }

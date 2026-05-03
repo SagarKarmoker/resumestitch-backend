@@ -11,11 +11,11 @@ import {
   Query,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { GenerationService } from './generation.service';
-import { User } from '../generated/prisma';
+import { User } from '@generated/prisma';
 import { GeneratePackageDto, RegenerateSectionDto, FeedbackDto, JdAnalysisDto, AtsCheckDto } from './dto/generation.dto';
 
 @ApiTags('generation')
@@ -29,7 +29,8 @@ export class GenerationController {
   @Post('analyze-jd')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Analyze a job description and extract key information' })
+  @ApiOperation({ summary: 'Analyze a job description', description: 'Extract company name, role, skills, seniority from job description' })
+  @ApiResponse({ status: 200, description: 'JD analysis result', example: { companyName: 'Google', roleTitle: 'Senior Software Engineer', seniority: 'SENIOR', requiredSkills: ['React', 'Node.js', 'TypeScript'], preferredSkills: ['GraphQL', 'AWS'] } })
   @HttpCode(HttpStatus.OK)
   async analyzeJd(@Body() body: JdAnalysisDto) {
     return this.generationService.analyzeJobDescription(body.jobDescription);
@@ -41,7 +42,10 @@ export class GenerationController {
   @Post('package/stream')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Generate a full application package (SSE stream)' })
+  @ApiOperation({ summary: 'Generate application package', description: 'Generate tailored resume, cover letter, and email via SSE stream' })
+  @ApiResponse({ status: 200, description: 'SSE stream with generated content chunks' })
+  @ApiResponse({ status: 400, description: 'Invalid job description or resume' })
+  @ApiResponse({ status: 403, description: 'Upgrade required for this feature' })
   async generatePackageStream(
     @Body() dto: GeneratePackageDto,
     @CurrentUser() user: User,
@@ -104,7 +108,9 @@ export class GenerationController {
   @Post(':generationId/feedback')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Submit thumbs up/down feedback on a generated output' })
+  @ApiOperation({ summary: 'Submit feedback', description: 'Rate generated output with thumbs up/down (1 or -1)' })
+  @ApiResponse({ status: 204, description: 'Feedback recorded successfully' })
+  @ApiResponse({ status: 404, description: 'Generation not found' })
   @HttpCode(HttpStatus.NO_CONTENT)
   async submitFeedback(
     @Param('generationId') generationId: string,
@@ -126,7 +132,8 @@ export class GenerationController {
   @Post('ats-check')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Run ATS keyword match checker' })
+  @ApiOperation({ summary: 'ATS keyword checker', description: 'Check resume against job description for keyword matching' })
+  @ApiResponse({ status: 200, description: 'ATS score and keywords', example: { atsScore: 85, matchedKeywords: ['React', 'TypeScript', 'Node.js'], missingKeywords: ['AWS', 'GraphQL'] } })
   @HttpCode(HttpStatus.OK)
   async atsCheck(@Body() body: AtsCheckDto) {
     return this.generationService.checkAts(body.jobDescription, body.resumeText);

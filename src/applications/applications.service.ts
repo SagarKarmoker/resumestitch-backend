@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GenerationService } from '../generation/generation.service';
-import { ApplicationStatus, Tier } from '../generated/prisma';
+import { ApplicationStatus, Tier } from '@generated/prisma';
 import { UpdateApplicationDto } from './dto/applications.dto';
 
 @Injectable()

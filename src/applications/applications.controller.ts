@@ -9,11 +9,11 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ApplicationsService } from './applications.service';
-import { User } from '../generated/prisma';
+import { User } from '@generated/prisma';
 import { UpdateStatusDto, UpdateApplicationDto } from './dto/applications.dto';
 
 @ApiTags('applications')
@@ -24,7 +24,8 @@ export class ApplicationsController {
   constructor(private readonly applicationsService: ApplicationsService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List all application tracker entries (Kanban board data)' })
+  @ApiOperation({ summary: 'List applications', description: 'Get all job applications for the user (Kanban board)' })
+  @ApiResponse({ status: 200, description: 'List of applications', example: [{ id: 'uuid', companyName: 'Google', roleTitle: 'Software Engineer', status: 'APPLIED', appliedAt: '2024-01-01T00:00:00Z' }] })
   async listApplications(@CurrentUser() user: User) {
     return this.applicationsService.listApplications(user.id);
   }

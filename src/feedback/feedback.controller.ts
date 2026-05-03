@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { User } from '../generated/prisma';
+import { User } from '@generated/prisma';
 import { CreateProductFeedbackDto } from './dto/create-feedback.dto';
 import { FeedbackService } from './feedback.service';
 

@@ -9,7 +9,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
-import { User, Tier } from '../generated/prisma';
+import { User, Tier } from '@generated/prisma';
 import * as pdfParse from 'pdf-parse';
 import { ParsedResume, CreateBaseResumeDto } from './types';
 

@@ -1,4 +1,4 @@
-import { CoverLetterTone } from '../../generated/prisma';
+import { CoverLetterTone } from '@generated/prisma';
 
 export interface GeneratePackageDto {
   jobDescription: string;

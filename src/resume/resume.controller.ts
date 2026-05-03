@@ -16,11 +16,11 @@ import {
   FileTypeValidator,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ResumeService } from './resume.service';
-import { User } from '../generated/prisma';
+import { User } from '@generated/prisma';
 import { ParseResumeDto, SaveResumeDto, RenameResumeDto } from './dto/resume.dto';
 
 const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5 MB
@@ -37,8 +37,10 @@ export class ResumeController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @UseInterceptors(FileInterceptor('file'))
-  @ApiOperation({ summary: 'Parse a PDF resume and extract text' })
+  @ApiOperation({ summary: 'Parse PDF resume', description: 'Extract text content from a PDF resume file' })
   @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 200, description: 'Extracted text from PDF', example: { text: 'John Doe\nSoftware Engineer\n5 years experience...' } })
+  @ApiResponse({ status: 400, description: 'Invalid file type or size' })
   @HttpCode(HttpStatus.OK)
   async parsePdf(
     @UploadedFile(
@@ -61,8 +63,10 @@ export class ResumeController {
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor('file'))
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Save a PDF resume to the base resume vault' })
+  @ApiOperation({ summary: 'Save resume to vault', description: 'Upload and save a PDF resume to your vault' })
   @ApiConsumes('multipart/form-data')
+  @ApiResponse({ status: 201, description: 'Resume saved successfully', example: { id: 'uuid', name: 'My Resume', fileSize: 102400, createdAt: '2024-01-01T00:00:00Z' } })
+  @ApiResponse({ status: 400, description: 'Invalid file or resume limit reached' })
   async saveResume(
     @CurrentUser() user: User,
     @UploadedFile(

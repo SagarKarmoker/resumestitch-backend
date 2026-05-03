@@ -16,6 +16,7 @@ import {
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
@@ -23,6 +24,7 @@ import { Public } from './decorators/public.decorator';
 import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
 import { AuthResponse } from './types';
 
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -36,6 +38,9 @@ export class AuthController {
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Register new user', description: 'Create a new user account and get JWT token' })
+  @ApiResponse({ status: 201, description: 'User registered successfully', schema: { example: { accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...', user: { id: 'uuid', email: 'john@example.com', fullName: 'John Doe', avatarUrl: null, tier: 'FREE' } } } })
+  @ApiResponse({ status: 400, description: 'Email already registered' })
   async register(@Body() dto: RegisterDto): Promise<AuthResponse> {
     try {
       const existing = await this.prisma.user.findUnique({
@@ -89,6 +94,9 @@ export class AuthController {
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Login user', description: 'Authenticate user with email and password' })
+  @ApiResponse({ status: 200, description: 'Login successful', schema: { example: { accessToken: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...', user: { id: 'uuid', email: 'john@example.com', fullName: 'John Doe', avatarUrl: null, tier: 'FREE' } } } })
+  @ApiResponse({ status: 401, description: 'Invalid email or password' })
   async login(@Body() dto: LoginDto): Promise<AuthResponse> {
     try {
       const user = await this.prisma.user.findUnique({

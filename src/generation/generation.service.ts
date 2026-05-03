@@ -11,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ResumeService } from '../resume/resume.service';
 import { PdfService } from '../pdf/pdf.service';
 import { StorageService } from '../storage/storage.service';
-import { User, CoverLetterTone, Tier } from '../generated/prisma';
+import { User, CoverLetterTone, Tier } from '@generated/prisma';
 import {
   RESUME_SYSTEM_PROMPT,
   COVER_LETTER_SYSTEM_PROMPT,
