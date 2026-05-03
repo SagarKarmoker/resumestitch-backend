@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ForbiddenException,
   InternalServerErrorException,
+  NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
@@ -29,7 +30,8 @@ export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
   private readonly defaultModel: string;
   private readonly fallbackModel: string | null;
-  private readonly requestTimeout = 30000;
+  private readonly streamTimeout: number;
+  private readonly callTimeout: number;
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly referer: string;
@@ -52,6 +54,10 @@ export class GenerationService {
     this.defaultModel = config.get<string>('OPENROUTER_DEFAULT_MODEL', 'openai/gpt-oss-120b:free');
     this.fallbackModel = config.get<string>('OPENROUTER_FALLBACK_MODEL') ?? null;
     this.referer = config.get<string>('FRONTEND_URL', 'http://localhost:5173');
+    // Free-tier LLMs (esp. gpt-oss-120b:free) can take 60-90s to return first token.
+    // Streaming timeout covers the full read; call timeout covers non-streamed calls.
+    this.streamTimeout = parseInt(config.get<string>('AI_STREAM_TIMEOUT_MS', '120000'));
+    this.callTimeout = parseInt(config.get<string>('AI_CALL_TIMEOUT_MS', '60000'));
 
     if (!this.apiKey) {
       this.logger.warn('OPENROUTER_API_KEY not configured - AI features will fail');
@@ -286,6 +292,55 @@ export class GenerationService {
     if (!key) throw new InternalServerErrorException(`PDF not yet generated for ${type}`);
 
     return this.storageService.getOutputUrl(key);
+  }
+
+  /**
+   * Full snapshot for dashboard / history viewer (authenticated owner only).
+   */
+  async getGenerationDetail(generationId: string, userId: string) {
+    const generation = await this.prisma.generation.findFirst({
+      where: { id: generationId, userId },
+      select: {
+        id: true,
+        createdAt: true,
+        jobDescription: true,
+        resumeText: true,
+        companyName: true,
+        roleTitle: true,
+        seniority: true,
+        requiredSkills: true,
+        preferredSkills: true,
+        tailoredResume: true,
+        coverLetter: true,
+        applicationEmail: true,
+        coverLetterTone: true,
+        atsScore: true,
+        matchedKeywords: true,
+        missingKeywords: true,
+        resumePdfKey: true,
+        coverLetterPdfKey: true,
+        emailPdfKey: true,
+        modelUsed: true,
+      },
+    });
+
+    if (!generation) {
+      throw new NotFoundException('Generation not found');
+    }
+
+    const {
+      resumePdfKey,
+      coverLetterPdfKey,
+      emailPdfKey,
+      ...rest
+    } = generation;
+
+    return {
+      ...rest,
+      hasResumePdf: !!resumePdfKey,
+      hasCoverLetterPdf: !!coverLetterPdfKey,
+      hasEmailPdf: !!emailPdfKey,
+    };
   }
 
   // ─── Individual Output Streams ────────────────────────────────────────────
@@ -540,7 +595,7 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
     model?: string,
   ): Promise<string> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeout);
+    const timeout = setTimeout(() => controller.abort(), this.streamTimeout);
 
     try {
       const models = this.getModels(model);
@@ -616,7 +671,7 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
     } catch (err: any) {
       if (err instanceof InternalServerErrorException) throw err;
       if (err.name === 'AbortError') {
-        this.logger.error(`AI stream timed out after ${this.requestTimeout}ms`);
+        this.logger.error(`AI stream timed out after ${this.streamTimeout}ms`);
         throw new InternalServerErrorException('AI request timed out. Please try again.');
       }
       this.logger.error('AI stream failed', err.message);
@@ -628,7 +683,7 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
 
   private async callAI(systemPrompt: string, userMessage: string, model?: string): Promise<string> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.requestTimeout);
+    const timeout = setTimeout(() => controller.abort(), this.callTimeout);
 
     try {
       const models = this.getModels(model);
@@ -659,7 +714,7 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
     } catch (err: any) {
       if (err instanceof InternalServerErrorException) throw err;
       if (err.name === 'AbortError') {
-        this.logger.error(`AI request timed out after ${this.requestTimeout}ms`);
+        this.logger.error(`AI request timed out after ${this.callTimeout}ms`);
         throw new InternalServerErrorException('AI request timed out. Please try again.');
       }
       this.logger.error('AI request failed', err.message);

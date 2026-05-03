@@ -101,6 +101,17 @@ export class ResumeController {
   }
 
   /**
+   * Presigned URL for viewing the stored vault resume PDF (for embed / preview).
+   */
+  @Get(':id/pdf-url')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Presigned URL for vault resume PDF' })
+  async getVaultResumePdfUrl(@Param('id') id: string, @CurrentUser() user: User) {
+    return this.resumeService.getBaseResumePdfUrl(id, user.id);
+  }
+
+  /**
    * Get a single base resume's extracted text
    */
   @Get(':id')

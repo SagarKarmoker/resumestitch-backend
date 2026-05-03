@@ -158,4 +158,21 @@ export class GenerationController {
     );
     return { url };
   }
+
+  /**
+   * Full generation snapshot for history viewer (text + PDF availability)
+   */
+  @Get(':generationId/detail')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get generation detail for dashboard viewer',
+    description: 'Returns stored JD, resume snapshot, tailored outputs, and which PDFs are available.',
+  })
+  async getGenerationDetail(
+    @Param('generationId') generationId: string,
+    @CurrentUser() user: User,
+  ) {
+    return this.generationService.getGenerationDetail(generationId, user.id);
+  }
 }

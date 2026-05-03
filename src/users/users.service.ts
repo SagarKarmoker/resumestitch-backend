@@ -152,6 +152,9 @@ export class UsersService {
           coverLetterRating: true,
           emailRating: true,
           createdAt: true,
+          resumePdfKey: true,
+          coverLetterPdfKey: true,
+          emailPdfKey: true,
           application: {
             select: { id: true, status: true },
           },
@@ -163,8 +166,22 @@ export class UsersService {
       this.prisma.generation.count({ where: { userId } }),
     ]);
 
+    const data = generations.map(
+      ({
+        resumePdfKey,
+        coverLetterPdfKey,
+        emailPdfKey,
+        ...g
+      }) => ({
+        ...g,
+        hasResumePdf: !!resumePdfKey,
+        hasCoverLetterPdf: !!coverLetterPdfKey,
+        hasEmailPdf: !!emailPdfKey,
+      }),
+    );
+
     return {
-      data: generations,
+      data,
       pagination: {
         page,
         limit,

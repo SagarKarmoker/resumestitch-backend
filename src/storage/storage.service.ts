@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   S3Client,
@@ -6,6 +6,7 @@ import {
   GetObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
+  HeadBucketCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 
@@ -18,7 +19,7 @@ export interface UploadResult {
 }
 
 @Injectable()
-export class StorageService {
+export class StorageService implements OnModuleInit {
   private readonly logger = new Logger(StorageService.name);
   private readonly s3Client: S3Client;
   private readonly resumesBucket: string;
@@ -27,18 +28,34 @@ export class StorageService {
 
   constructor(private readonly config: ConfigService) {
     this.endpoint = config.get<string>('S3_ENDPOINT');
-    this.resumesBucket = config.get<string>('S3_BUCKET_RESUMES', 'resumes');
-    this.outputsBucket = config.get<string>('S3_BUCKET_OUTPUTS', 'outputs');
+    this.resumesBucket = config.get<string>('S3_BUCKET_RESUMES', 'resumestitch');
+    this.outputsBucket = config.get<string>('S3_BUCKET_OUTPUTS', 'resumestitch');
 
     this.s3Client = new S3Client({
       forcePathStyle: true,
-      region: config.get<string>('S3_REGION', 'ap-southeast-1'),
+      region: config.get<string>('S3_REGION', 'ap-northeast-2'),
       endpoint: this.endpoint,
       credentials: {
         accessKeyId: config.get<string>('S3_ACCESS_KEY_ID'),
         secretAccessKey: config.get<string>('S3_SECRET_ACCESS_KEY'),
       },
     });
+  }
+
+  /** Verify bucket connectivity once at startup — logs WARN rather than crashing. */
+  async onModuleInit() {
+    const buckets = [...new Set([this.resumesBucket, this.outputsBucket])];
+    for (const bucket of buckets) {
+      try {
+        await this.s3Client.send(new HeadBucketCommand({ Bucket: bucket }));
+        this.logger.log(`Storage bucket "${bucket}" reachable`);
+      } catch (err: any) {
+        this.logger.warn(
+          `Storage bucket "${bucket}" NOT reachable at startup: ${err?.Code ?? err?.message}. ` +
+          'Uploads will fail until the bucket exists.',
+        );
+      }
+    }
   }
 
   /**
@@ -50,12 +67,13 @@ export class StorageService {
     buffer: Buffer,
     contentType: string = 'application/pdf',
   ): Promise<UploadResult> {
-    const key = `${userId}/${Date.now()}_${fileName}`;
+    const key = `resumes/${userId}/${Date.now()}_${fileName}`;
     return this.upload(this.resumesBucket, key, buffer, contentType);
   }
 
   /**
-   * Upload a generated output PDF (resume, cover letter, email)
+   * Upload a generated output PDF (resume, cover letter, email).
+   * Uses the `outputs/` prefix inside the same bucket when resumesBucket === outputsBucket.
    */
   async uploadOutput(
     userId: string,
@@ -63,7 +81,7 @@ export class StorageService {
     type: 'resume' | 'cover-letter' | 'email',
     buffer: Buffer,
   ): Promise<UploadResult> {
-    const key = `${userId}/${generationId}/${type}.pdf`;
+    const key = `outputs/${userId}/${generationId}/${type}.pdf`;
     return this.upload(this.outputsBucket, key, buffer, 'application/pdf');
   }
 

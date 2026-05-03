@@ -176,6 +176,16 @@ export class ResumeService {
     }
   }
 
+  /** Short-lived signed URL so the viewer can embed the vault PDF (same access as GET :id). */
+  async getBaseResumePdfUrl(id: string, userId: string): Promise<{ url: string }> {
+    const resume = await this.getBaseResume(id, userId);
+    if (!resume.storageKey) {
+      throw new BadRequestException('Resume PDF is unavailable.');
+    }
+    const url = await this.storage.getResumeUrl(resume.storageKey);
+    return { url };
+  }
+
   async deleteBaseResume(id: string, userId: string) {
     try {
       const resume = await this.getBaseResume(id, userId);
