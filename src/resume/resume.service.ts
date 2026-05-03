@@ -4,22 +4,14 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { User, Tier } from '../generated/prisma';
 import * as pdfParse from 'pdf-parse';
-
-export interface ParsedResume {
-  text: string;
-  confidence: number;  // 0–1 confidence score
-  warning?: string;
-}
-
-export interface CreateBaseResumeDto {
-  name: string;
-}
+import { ParsedResume, CreateBaseResumeDto } from './types';
 
 const RESUME_LIMITS: Record<Tier, number> = {
   FREE: 1,
@@ -107,91 +99,122 @@ export class ResumeService {
     originalName: string,
     mimeType: string,
   ) {
-    // Check tier limits
-    const count = await this.prisma.baseResume.count({ where: { userId: user.id } });
-    const limit = RESUME_LIMITS[user.tier];
+    try {
+      const count = await this.prisma.baseResume.count({ where: { userId: user.id } });
+      const limit = RESUME_LIMITS[user.tier];
 
-    if (count >= limit) {
-      throw new ForbiddenException(
-        `Your ${user.tier} plan allows up to ${limit} saved resume(s). ` +
-        `Upgrade your plan or delete an existing resume.`,
-      );
+      if (count >= limit) {
+        throw new ForbiddenException(
+          `Your ${user.tier} plan allows up to ${limit} saved resume(s). ` +
+          `Upgrade your plan or delete an existing resume.`,
+        );
+      }
+
+      const { text, confidence, warning } = await this.parsePdf(buffer);
+
+      if (!text) {
+        throw new BadRequestException('Could not extract text from your resume PDF.');
+      }
+
+      const upload = await this.storage.uploadResume(user.id, originalName, buffer, mimeType);
+
+      const baseResume = await this.prisma.baseResume.create({
+        data: {
+          userId: user.id,
+          name,
+          extractedText: text,
+          storageKey: upload.key,
+          fileSize: buffer.length,
+          mimeType,
+        },
+      });
+
+      return { baseResume, confidence, warning };
+    } catch (error: any) {
+      if (error instanceof ForbiddenException || error instanceof BadRequestException) throw error;
+      this.logger.error('Save base resume failed', error.message);
+      throw new InternalServerErrorException('Failed to save resume. Please try again.');
     }
-
-    const { text, confidence, warning } = await this.parsePdf(buffer);
-
-    if (!text) {
-      throw new BadRequestException('Could not extract text from your resume PDF.');
-    }
-
-    // Upload original file to Supabase Storage
-    const upload = await this.storage.uploadResume(user.id, originalName, buffer, mimeType);
-
-    const baseResume = await this.prisma.baseResume.create({
-      data: {
-        userId: user.id,
-        name,
-        extractedText: text,
-        storageKey: upload.key,
-        fileSize: buffer.length,
-        mimeType,
-      },
-    });
-
-    return { baseResume, confidence, warning };
   }
 
   async listBaseResumes(userId: string) {
-    return this.prisma.baseResume.findMany({
-      where: { userId },
-      select: {
-        id: true,
-        name: true,
-        fileSize: true,
-        mimeType: true,
-        lastUsedAt: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    try {
+      return await this.prisma.baseResume.findMany({
+        where: { userId },
+        select: {
+          id: true,
+          name: true,
+          fileSize: true,
+          mimeType: true,
+          lastUsedAt: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+    } catch (error: any) {
+      this.logger.error('List base resumes failed', error.message);
+      throw new InternalServerErrorException('Failed to retrieve resumes. Please try again.');
+    }
   }
 
   async getBaseResume(id: string, userId: string) {
-    const resume = await this.prisma.baseResume.findFirst({
-      where: { id, userId },
-    });
+    try {
+      const resume = await this.prisma.baseResume.findFirst({
+        where: { id, userId },
+      });
 
-    if (!resume) {
-      throw new NotFoundException('Resume not found');
+      if (!resume) {
+        throw new NotFoundException('Resume not found');
+      }
+
+      return resume;
+    } catch (error: any) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error('Get base resume failed', error.message);
+      throw new InternalServerErrorException('Failed to retrieve resume. Please try again.');
     }
-
-    return resume;
   }
 
   async deleteBaseResume(id: string, userId: string) {
-    const resume = await this.getBaseResume(id, userId);
+    try {
+      const resume = await this.getBaseResume(id, userId);
 
-    if (resume.storageKey) {
-      await this.storage.deleteResume(resume.storageKey);
+      if (resume.storageKey) {
+        await this.storage.deleteResume(resume.storageKey);
+      }
+
+      await this.prisma.baseResume.delete({ where: { id } });
+    } catch (error: any) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error('Delete base resume failed', error.message);
+      throw new InternalServerErrorException('Failed to delete resume. Please try again.');
     }
-
-    await this.prisma.baseResume.delete({ where: { id } });
   }
 
   async renameBaseResume(id: string, userId: string, name: string) {
-    await this.getBaseResume(id, userId);
+    try {
+      await this.getBaseResume(id, userId);
 
-    return this.prisma.baseResume.update({
-      where: { id },
-      data: { name },
-    });
+      return await this.prisma.baseResume.update({
+        where: { id },
+        data: { name },
+      });
+    } catch (error: any) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error('Rename base resume failed', error.message);
+      throw new InternalServerErrorException('Failed to rename resume. Please try again.');
+    }
   }
 
   async markResumeUsed(id: string) {
-    await this.prisma.baseResume.update({
-      where: { id },
-      data: { lastUsedAt: new Date() },
-    });
+    try {
+      await this.prisma.baseResume.update({
+        where: { id },
+        data: { lastUsedAt: new Date() },
+      });
+    } catch (error: any) {
+      this.logger.warn('Mark resume used failed (non-critical)', error.message);
+    }
   }
 }

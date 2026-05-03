@@ -14,8 +14,9 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { UsersService, UpdatePreferencesDto } from './users.service';
+import { UsersService } from './users.service';
 import { User } from '../generated/prisma';
+import { UpdatePreferencesDto } from './dto/users.dto';
 
 @ApiTags('users')
 @Controller('users')

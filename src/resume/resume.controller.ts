@@ -22,25 +22,7 @@ import { OptionalJwtGuard } from '../auth/guards/optional-jwt.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ResumeService } from './resume.service';
 import { User } from '../generated/prisma';
-import { IsString, IsNotEmpty, MaxLength } from 'class-validator';
-
-class ParseResumeDto {
-  // No body fields — file only
-}
-
-class SaveResumeDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  name: string;
-}
-
-class RenameResumeDto {
-  @IsString()
-  @IsNotEmpty()
-  @MaxLength(100)
-  name: string;
-}
+import { ParseResumeDto, SaveResumeDto, RenameResumeDto } from './dto/resume.dto';
 
 const MAX_PDF_SIZE = 5 * 1024 * 1024; // 5 MB
 

@@ -12,62 +12,13 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsString, IsOptional, IsEnum, MinLength, IsIn } from 'class-validator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OptionalJwtGuard } from '../auth/guards/optional-jwt.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
 import { GenerationService } from './generation.service';
-import { User, CoverLetterTone } from '../generated/prisma';
-
-class GeneratePackageDto {
-  @IsString()
-  @MinLength(50)
-  jobDescription: string;
-
-  @IsOptional()
-  @IsString()
-  resumeText?: string;
-
-  @IsOptional()
-  @IsString()
-  baseResumeId?: string;
-
-  @IsOptional()
-  @IsEnum(CoverLetterTone)
-  coverLetterTone?: CoverLetterTone;
-}
-
-class RegenerateSectionDto {
-  @IsString()
-  section: string;
-
-  @IsOptional()
-  @IsString()
-  instruction?: string;
-}
-
-class FeedbackDto {
-  @IsIn(['resume', 'coverLetter', 'email'])
-  type: 'resume' | 'coverLetter' | 'email';
-
-  @IsIn([1, -1])
-  rating: 1 | -1;
-
-  @IsOptional()
-  @IsString()
-  note?: string;
-}
-
-class AtsCheckDto {
-  @IsString()
-  @MinLength(20)
-  jobDescription: string;
-
-  @IsString()
-  @MinLength(20)
-  resumeText: string;
-}
+import { User } from '../generated/prisma';
+import { GeneratePackageDto, RegenerateSectionDto, FeedbackDto, JdAnalysisDto, AtsCheckDto } from './dto/generation.dto';
 
 @ApiTags('generation')
 @Controller('generation')
@@ -81,7 +32,7 @@ export class GenerationController {
   @UseGuards(OptionalJwtGuard)
   @ApiOperation({ summary: 'Analyze a job description and extract key information' })
   @HttpCode(HttpStatus.OK)
-  async analyzeJd(@Body() body: { jobDescription: string }) {
+  async analyzeJd(@Body() body: JdAnalysisDto) {
     return this.generationService.analyzeJobDescription(body.jobDescription);
   }
 

@@ -7,73 +7,26 @@ import {
   UseGuards,
   Get,
   Request,
+  BadRequestException,
+  UnauthorizedException,
+  InternalServerErrorException,
+  NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthGuard } from '@nestjs/passport';
-import { IsEmail, IsString, MinLength, IsOptional } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { Public } from './decorators/public.decorator';
-
-class RegisterDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  @MinLength(8)
-  password!: string;
-
-  @IsOptional()
-  @IsString()
-  fullName?: string;
-}
-
-class LoginDto {
-  @IsEmail()
-  email!: string;
-
-  @IsString()
-  password!: string;
-}
-
-class ForgotPasswordDto {
-  @IsEmail()
-  email!: string;
-}
-
-class ResetPasswordDto {
-  @IsString()
-  token!: string;
-
-  @IsString()
-  @MinLength(8)
-  newPassword!: string;
-}
-
-class ChangePasswordDto {
-  @IsString()
-  currentPassword!: string;
-
-  @IsString()
-  @MinLength(8)
-  newPassword!: string;
-}
-
-interface AuthResponse {
-  accessToken: string;
-  user: {
-    id: string;
-    email: string;
-    fullName: string | null;
-    avatarUrl: string | null;
-    tier: string;
-  };
-}
+import { RegisterDto, LoginDto, ForgotPasswordDto, ResetPasswordDto, ChangePasswordDto } from './dto/auth.dto';
+import { AuthResponse } from './types';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwt: JwtService,
@@ -84,79 +37,91 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterDto): Promise<AuthResponse> {
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    try {
+      const existing = await this.prisma.user.findUnique({
+        where: { email: dto.email },
+      });
 
-    if (existing) {
-      throw new Error('Email already registered');
-    }
+      if (existing) {
+        throw new BadRequestException('Email already registered');
+      }
 
-    const passwordHash = await bcrypt.hash(dto.password, 12);
+      const passwordHash = await bcrypt.hash(dto.password, 12);
 
-    const user = await this.prisma.user.create({
-      data: {
-        email: dto.email,
-        password: passwordHash,
-        fullName: dto.fullName || null,
-        preferences: {
-          create: {},
+      const user = await this.prisma.user.create({
+        data: {
+          email: dto.email,
+          password: passwordHash,
+          fullName: dto.fullName || null,
+          preferences: {
+            create: {},
+          },
         },
-      },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        avatarUrl: true,
-        tier: true,
-      },
-    });
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          avatarUrl: true,
+          tier: true,
+        },
+      });
 
-    const payload = { sub: user.id, email: user.email };
-    const accessToken = this.jwt.sign(payload);
+      const payload = { sub: user.id, email: user.email };
+      const accessToken = this.jwt.sign(payload);
 
-    return {
-      accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        avatarUrl: user.avatarUrl,
-        tier: user.tier,
-      },
-    };
+      return {
+        accessToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          avatarUrl: user.avatarUrl,
+          tier: user.tier,
+        },
+      };
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error('Registration failed', error.message);
+      throw new InternalServerErrorException('Registration failed. Please try again.');
+    }
   }
 
   @Public()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   async login(@Body() dto: LoginDto): Promise<AuthResponse> {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: dto.email },
+      });
 
-    if (!user) {
-      throw new Error('Invalid credentials');
+      if (!user) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
+
+      const valid = await bcrypt.compare(dto.password, user.password);
+      if (!valid) {
+        throw new UnauthorizedException('Invalid email or password');
+      }
+
+      const payload = { sub: user.id, email: user.email };
+      const accessToken = this.jwt.sign(payload);
+
+      return {
+        accessToken,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName,
+          avatarUrl: user.avatarUrl,
+          tier: user.tier,
+        },
+      };
+    } catch (error: any) {
+      if (error instanceof UnauthorizedException) throw error;
+      this.logger.error('Login failed', error.message);
+      throw new InternalServerErrorException('Login failed. Please try again.');
     }
-
-    const valid = await bcrypt.compare(dto.password, user.password);
-    if (!valid) {
-      throw new Error('Invalid credentials');
-    }
-
-    const payload = { sub: user.id, email: user.email };
-    const accessToken = this.jwt.sign(payload);
-
-    return {
-      accessToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        fullName: user.fullName,
-        avatarUrl: user.avatarUrl,
-        tier: user.tier,
-      },
-    };
   }
 
   @Post('logout')
@@ -167,97 +132,122 @@ export class AuthController {
   @Post('forgot-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   async forgotPassword(@Body() dto: ForgotPasswordDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { email: dto.email },
+      });
 
-    if (!user) {
-      return;
+      if (!user) {
+        return;
+      }
+
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenExpiry = new Date(Date.now() + 3600000);
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          resetToken,
+          resetTokenExpiry,
+        },
+      });
+
+      const resetUrl = `${this.config.get('FRONTEND_URL')}/auth/reset-password?token=${resetToken}`;
+      this.logger.log(`Password reset link: ${resetUrl}`);
+    } catch (error: any) {
+      this.logger.error('Forgot password failed', error.message);
     }
-
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const resetTokenExpiry = new Date(Date.now() + 3600000);
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        resetToken,
-        resetTokenExpiry,
-      },
-    });
-
-    const resetUrl = `${this.config.get('FRONTEND_URL')}/auth/reset-password?token=${resetToken}`;
-    console.log(`Password reset link: ${resetUrl}`);
   }
 
   @Public()
   @Post('reset-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   async resetPassword(@Body() dto: ResetPasswordDto) {
-    const user = await this.prisma.user.findFirst({
-      where: {
-        resetToken: dto.token,
-        resetTokenExpiry: {
-          gt: new Date(),
+    try {
+      const user = await this.prisma.user.findFirst({
+        where: {
+          resetToken: dto.token,
+          resetTokenExpiry: {
+            gt: new Date(),
+          },
         },
-      },
-    });
+      });
 
-    if (!user) {
-      throw new Error('Invalid or expired reset token');
+      if (!user) {
+        throw new BadRequestException('Invalid or expired reset token');
+      }
+
+      const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: {
+          password: passwordHash,
+          resetToken: null,
+          resetTokenExpiry: null,
+        },
+      });
+    } catch (error: any) {
+      if (error instanceof BadRequestException) throw error;
+      this.logger.error('Reset password failed', error.message);
+      throw new InternalServerErrorException('Password reset failed. Please try again.');
     }
-
-    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        password: passwordHash,
-        resetToken: null,
-        resetTokenExpiry: null,
-      },
-    });
   }
 
   @UseGuards(AuthGuard('jwt'))
   @Post('change-password')
   @HttpCode(HttpStatus.NO_CONTENT)
   async changePassword(@Request() req: any, @Body() dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: req.user.id },
-    });
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: req.user.id },
+      });
 
-    if (!user) {
-      throw new Error('User not found');
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+
+      const valid = await bcrypt.compare(dto.currentPassword, user.password);
+      if (!valid) {
+        throw new BadRequestException('Current password is incorrect');
+      }
+
+      const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { password: passwordHash },
+      });
+    } catch (error: any) {
+      if (error instanceof NotFoundException || error instanceof BadRequestException) throw error;
+      this.logger.error('Change password failed', error.message);
+      throw new InternalServerErrorException('Password change failed. Please try again.');
     }
-
-    const valid = await bcrypt.compare(dto.currentPassword, user.password);
-    if (!valid) {
-      throw new Error('Current password is incorrect');
-    }
-
-    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
-
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: { password: passwordHash },
-    });
   }
 
-  @UseGuards(AuthGuard('jwt'))
+@UseGuards(AuthGuard('jwt'))
   @Get('me')
   async me(@Request() req: any) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: {
-        id: true,
-        email: true,
-        fullName: true,
-        avatarUrl: true,
-        tier: true,
-        createdAt: true,
-      },
-    });
-    return user;
+    try {
+      const user = await this.prisma.user.findUnique({
+        where: { id: req.user.id },
+        select: {
+          id: true,
+          email: true,
+          fullName: true,
+          avatarUrl: true,
+          tier: true,
+          createdAt: true,
+        },
+      });
+      if (!user) {
+        throw new NotFoundException('User not found');
+      }
+      return user;
+    } catch (error: any) {
+      if (error instanceof NotFoundException) throw error;
+      this.logger.error('Get user failed', error.message);
+      throw new InternalServerErrorException('Failed to get user info. Please try again.');
+    }
   }
 }

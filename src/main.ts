@@ -11,10 +11,11 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3001;
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+  const supbaseUrl = process.env.S3_ENDPOINT!
 
   // CORS
   app.enableCors({
-    origin: [frontendUrl, 'http://localhost:3000'],
+    origin: [frontendUrl, 'http://localhost:3000', supbaseUrl],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,

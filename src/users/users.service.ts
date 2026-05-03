@@ -5,51 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CoverLetterTone, SeniorityLevel, User } from '../generated/prisma';
-import { IsOptional, IsString, IsEnum, IsBoolean, IsInt, Min, Max } from 'class-validator';
-
-export class UpdatePreferencesDto {
-  @IsOptional()
-  @IsEnum(CoverLetterTone)
-  defaultTone?: CoverLetterTone;
-
-  @IsOptional()
-  @IsString()
-  targetIndustry?: string;
-
-  @IsOptional()
-  @IsEnum(SeniorityLevel)
-  seniorityLevel?: SeniorityLevel;
-
-  @IsOptional()
-  @IsString()
-  preferredName?: string;
-
-  @IsOptional()
-  @IsString()
-  contactEmail?: string;
-
-  @IsOptional()
-  @IsString()
-  contactPhone?: string;
-
-  @IsOptional()
-  @IsString()
-  linkedinUrl?: string;
-
-  @IsOptional()
-  @IsBoolean()
-  resumeStorageEnabled?: boolean;
-
-  @IsOptional()
-  @IsInt()
-  @Min(30)
-  @Max(365)
-  historyRetentionDays?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  feedbackOptOut?: boolean;
-}
+import { UpdatePreferencesDto } from './dto/users.dto';
 
 @Injectable()
 export class UsersService {

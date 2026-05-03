@@ -12,14 +12,9 @@ import {
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { ApplicationsService, UpdateApplicationDto } from './applications.service';
-import { User, ApplicationStatus } from '../generated/prisma';
-import { IsEnum } from 'class-validator';
-
-class UpdateStatusDto {
-  @IsEnum(ApplicationStatus)
-  status: ApplicationStatus;
-}
+import { ApplicationsService } from './applications.service';
+import { User } from '../generated/prisma';
+import { UpdateStatusDto, UpdateApplicationDto } from './dto/applications.dto';
 
 @ApiTags('applications')
 @Controller('applications')
