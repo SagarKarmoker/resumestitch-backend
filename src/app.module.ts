@@ -10,6 +10,8 @@ import { ResumeModule } from './resume/resume.module';
 import { GenerationModule } from './generation/generation.module';
 import { UsersModule } from './users/users.module';
 import { ApplicationsModule } from './applications/applications.module';
+import { ReferralsModule } from './referrals/referrals.module';
+import { HealthModule } from './health/health.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
 
@@ -34,6 +36,8 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
     GenerationModule,
     UsersModule,
     ApplicationsModule,
+    ReferralsModule,
+    HealthModule,
   ],
   providers: [
     // Apply JWT auth globally — use @Public() to opt out

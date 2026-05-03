@@ -6,13 +6,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
-    "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",
+    "start:dev": "ts-node-dev --respawn --transpile-only -r tsconfig-paths/register src/main.ts",
     "start:debug": "ts-node --inspect -r tsconfig-paths/register src/main.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
-    "prisma:format": "prisma format"
+    "prisma:format": "prisma format",
+    "verify:openrouter": "ts-node scripts/verify-openrouter.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.788.0",
@@ -27,6 +28,7 @@
     "@nestjs/throttler": "^6.4.0",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
@@ -37,6 +39,7 @@
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.18.0",
     "pg": "^8.20.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2"
@@ -50,6 +53,7 @@
     "@types/pdf-parse": "^1.1.4",
     "prisma": "^7.8.0",
     "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
     "tsconfig-paths": "^4.2.0",
     "typescript": "^5.8.3"
   }

@@ -6,9 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Response } from 'express';
-import OpenAI from 'openai';
 import { PrismaService } from '../prisma/prisma.service';
 import { ResumeService } from '../resume/resume.service';
+import { PdfService } from '../pdf/pdf.service';
+import { StorageService } from '../storage/storage.service';
 import { User, CoverLetterTone } from '../generated/prisma';
 import {
   RESUME_SYSTEM_PROMPT,
@@ -25,31 +26,37 @@ import { JdAnalysisResult, GeneratePackageDto } from './types';
 @Injectable()
 export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
-  private readonly openai: OpenAI;
   private readonly defaultModel: string;
+  private readonly fallbackModel: string | null;
   private readonly requestTimeout = 30000;
+  private readonly apiKey: string;
+  private readonly baseURL: string;
+  private readonly referer: string;
 
   constructor(
     private readonly config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly resumeService: ResumeService,
+    private readonly pdfService: PdfService,
+    private readonly storageService: StorageService,
   ) {
-    const apiKey = config.get<string>('OPENROUTER_API_KEY');
-    const baseURL = config.get<string>('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
-    this.defaultModel = config.get<string>('OPENROUTER_DEFAULT_MODEL', 'google/gemini-2.0-flash-001');
+    this.apiKey = config.get<string>('OPENROUTER_API_KEY') ?? '';
+    this.baseURL = config.get<string>('OPENROUTER_BASE_URL', 'https://openrouter.ai/api/v1');
+    this.defaultModel = config.get<string>('OPENROUTER_DEFAULT_MODEL', 'openai/gpt-oss-120b:free');
+    this.fallbackModel = config.get<string>('OPENROUTER_FALLBACK_MODEL') ?? null;
+    this.referer = config.get<string>('FRONTEND_URL', 'http://localhost:5173');
 
-    if (!apiKey) {
+    if (!this.apiKey) {
       this.logger.warn('OPENROUTER_API_KEY not configured - AI features will fail');
     }
+  }
 
-    this.openai = new OpenAI({
-      apiKey,
-      baseURL,
-      defaultHeaders: {
-        'HTTP-Referer': config.get<string>('FRONTEND_URL', 'http://localhost:5173'),
-        'X-Title': 'ResumeStitch',
-      },
-    });
+  /** Returns the model list for OpenRouter: primary + optional fallback. */
+  private getModels(override?: string): string[] {
+    const primary = override || this.defaultModel;
+    return this.fallbackModel && this.fallbackModel !== primary
+      ? [primary, this.fallbackModel]
+      : [primary];
   }
 
   // ─── JD Analysis ─────────────────────────────────────────────────────────
@@ -175,6 +182,11 @@ export class GenerationService {
             },
           });
         }
+
+        // Generate PDFs asynchronously — does not block SSE response
+        this.generateAndStorePdfs(user.id, generation.id, resume, coverLetter, email).catch(
+          (err) => this.logger.warn('PDF generation failed (non-blocking)', err?.message),
+        );
       }
 
       sendEvent('complete', {
@@ -194,6 +206,79 @@ export class GenerationService {
     } finally {
       res.end();
     }
+  }
+
+  // ─── PDF Generation ───────────────────────────────────────────────────────
+
+  private async generateAndStorePdfs(
+    userId: string,
+    generationId: string,
+    resume: any | null,
+    coverLetter: string | null,
+    email: { subject: string; body: string } | null,
+  ): Promise<void> {
+    const updates: Record<string, string> = {};
+
+    if (resume) {
+      try {
+        const buf = await this.pdfService.generateResumePdf(resume);
+        const result = await this.storageService.uploadOutput(userId, generationId, 'resume', buf);
+        updates['resumePdfKey'] = result.key;
+      } catch (err) {
+        this.logger.warn(`Resume PDF failed for ${generationId}`, err?.message);
+      }
+    }
+
+    if (coverLetter) {
+      try {
+        const buf = await this.pdfService.generateCoverLetterPdf(coverLetter, resume?.name);
+        const result = await this.storageService.uploadOutput(userId, generationId, 'cover-letter', buf);
+        updates['coverLetterPdfKey'] = result.key;
+      } catch (err) {
+        this.logger.warn(`Cover letter PDF failed for ${generationId}`, err?.message);
+      }
+    }
+
+    if (email) {
+      try {
+        const buf = await this.pdfService.generateEmailPdf(email.subject, email.body);
+        const result = await this.storageService.uploadOutput(userId, generationId, 'email', buf);
+        updates['emailPdfKey'] = result.key;
+      } catch (err) {
+        this.logger.warn(`Email PDF failed for ${generationId}`, err?.message);
+      }
+    }
+
+    if (Object.keys(updates).length > 0) {
+      await this.prisma.generation.update({
+        where: { id: generationId },
+        data: updates,
+      });
+    }
+  }
+
+  async getPdfDownloadUrl(
+    generationId: string,
+    userId: string,
+    type: 'resume' | 'cover-letter' | 'email',
+  ): Promise<string> {
+    const generation = await this.prisma.generation.findFirst({
+      where: { id: generationId, userId },
+      select: { resumePdfKey: true, coverLetterPdfKey: true, emailPdfKey: true },
+    });
+
+    if (!generation) throw new InternalServerErrorException('Generation not found');
+
+    const keyMap: Record<string, string | null> = {
+      'resume': generation.resumePdfKey,
+      'cover-letter': generation.coverLetterPdfKey,
+      'email': generation.emailPdfKey,
+    };
+
+    const key = keyMap[type];
+    if (!key) throw new InternalServerErrorException(`PDF not yet generated for ${type}`);
+
+    return this.storageService.getOutputUrl(key);
   }
 
   // ─── Individual Output Streams ────────────────────────────────────────────
@@ -426,45 +511,119 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
 
   // ─── Private Helpers ──────────────────────────────────────────────────────
 
+  private buildHeaders(): Record<string, string> {
+    return {
+      'Authorization': `Bearer ${this.apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': this.referer,
+      'X-OpenRouter-Title': 'ResumeStitch',
+    };
+  }
+
   private async streamCompletion(
     systemPrompt: string,
     userMessage: string,
     onToken: (token: string) => void,
     model?: string,
   ): Promise<string> {
-    const stream = await this.openai.chat.completions.create({
-      model: model || this.defaultModel,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage },
-      ],
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 4096,
-    });
-
-    let fullText = '';
-
-    for await (const chunk of stream) {
-      const token = chunk.choices[0]?.delta?.content || '';
-      if (token) {
-        fullText += token;
-        onToken(token);
-      }
-    }
-
-    return fullText;
-  }
-
-  private async callAI(systemPrompt: string, userMessage: string, model?: string): Promise<string> {
-    const modelToUse = model || this.defaultModel;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeout);
 
     try {
-      const response = await this.openai.chat.completions.create(
-        {
-          model: modelToUse,
+      const models = this.getModels(model);
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: this.buildHeaders(),
+        body: JSON.stringify({
+          models,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userMessage },
+          ],
+          stream: true,
+          temperature: 0.7,
+          max_tokens: 4096,
+        }),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errBody = await response.text();
+        this.logger.error('AI stream request failed', `${response.status} ${errBody}`);
+        throw new InternalServerErrorException('AI service unavailable. Please try again later.');
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) throw new InternalServerErrorException('No response body from AI service.');
+
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullText = '';
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          while (true) {
+            const lineEnd = buffer.indexOf('\n');
+            if (lineEnd === -1) break;
+
+            const line = buffer.slice(0, lineEnd).trim();
+            buffer = buffer.slice(lineEnd + 1);
+
+            if (!line.startsWith('data: ')) continue;
+
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
+
+            try {
+              const parsed = JSON.parse(data);
+              if (parsed.error) {
+                this.logger.error('AI stream error', parsed.error.message);
+                throw new InternalServerErrorException('AI service unavailable. Please try again later.');
+              }
+              const token: string = parsed.choices?.[0]?.delta?.content || '';
+              if (token) {
+                fullText += token;
+                onToken(token);
+              }
+            } catch (parseErr: any) {
+              if (parseErr instanceof InternalServerErrorException) throw parseErr;
+            }
+          }
+        }
+      } finally {
+        reader.releaseLock();
+      }
+
+      return fullText;
+    } catch (err: any) {
+      if (err instanceof InternalServerErrorException) throw err;
+      if (err.name === 'AbortError') {
+        this.logger.error(`AI stream timed out after ${this.requestTimeout}ms`);
+        throw new InternalServerErrorException('AI request timed out. Please try again.');
+      }
+      this.logger.error('AI stream failed', err.message);
+      throw new InternalServerErrorException('AI service unavailable. Please try again later.');
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private async callAI(systemPrompt: string, userMessage: string, model?: string): Promise<string> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeout);
+
+    try {
+      const models = this.getModels(model);
+      const response = await fetch(`${this.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: this.buildHeaders(),
+        body: JSON.stringify({
+          models,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userMessage },
@@ -472,14 +631,22 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
           stream: false,
           temperature: 0.3,
           max_tokens: 4096,
-        },
-        { signal: controller.signal },
-      );
+        }),
+        signal: controller.signal,
+      });
 
-      return response.choices[0]?.message?.content || '';
+      if (!response.ok) {
+        const errBody = await response.text();
+        this.logger.error('AI request failed', `${response.status} ${errBody}`);
+        throw new InternalServerErrorException('AI service unavailable. Please try again later.');
+      }
+
+      const data = await response.json() as { choices: { message: { content: string } }[] };
+      return data.choices?.[0]?.message?.content || '';
     } catch (err: any) {
-      if (err.name === 'AbortError' || err.code === 'ECONNABORTED') {
-        this.logger.error(`AI request timed out after ${this.requestTimeout}ms`, err.message);
+      if (err instanceof InternalServerErrorException) throw err;
+      if (err.name === 'AbortError') {
+        this.logger.error(`AI request timed out after ${this.requestTimeout}ms`);
         throw new InternalServerErrorException('AI request timed out. Please try again.');
       }
       this.logger.error('AI request failed', err.message);
@@ -496,27 +663,30 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
 
     const trimmed = text.trim();
 
-    try {
-      const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (jsonMatch) {
-        return JSON.parse(jsonMatch[1]) as T;
-      }
+    // Each attempt is independent so a failed parse doesn't skip subsequent ones
 
-      const arrayMatch = trimmed.match(/(\[[\s\S]*\])/);
-      if (arrayMatch) {
-        return JSON.parse(arrayMatch[1]) as T;
-      }
-
-      const objMatch = trimmed.match(/(\{[\s\S]*\})/);
-      if (objMatch) {
-        return JSON.parse(objMatch[1]) as T;
-      }
-
-      return JSON.parse(trimmed) as T;
-    } catch {
-      const preview = text.substring(0, 300);
-      this.logger.warn('Failed to parse AI response', preview);
-      throw new InternalServerErrorException('AI returned an unexpected format. Please try again.');
+    // 1. Markdown code block: ```json ... ```
+    const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      try { return JSON.parse(codeBlockMatch[1]) as T; } catch {}
     }
+
+    // 2. Direct parse (clean JSON response with no wrapper text)
+    try { return JSON.parse(trimmed) as T; } catch {}
+
+    // 3. Extract JSON object (greedy — finds outermost { })
+    const objMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (objMatch) {
+      try { return JSON.parse(objMatch[0]) as T; } catch {}
+    }
+
+    // 4. Extract JSON array (greedy — finds outermost [ ])
+    const arrMatch = trimmed.match(/\[[\s\S]*\]/);
+    if (arrMatch) {
+      try { return JSON.parse(arrMatch[0]) as T; } catch {}
+    }
+
+    this.logger.warn('Failed to parse AI response', text.substring(0, 300));
+    throw new InternalServerErrorException('AI returned an unexpected format. Please try again.');
   }
 }

@@ -131,4 +131,24 @@ export class GenerationController {
   async atsCheck(@Body() body: AtsCheckDto) {
     return this.generationService.checkAts(body.jobDescription, body.resumeText);
   }
+
+  /**
+   * Get presigned download URL for a generated PDF
+   */
+  @Get(':generationId/pdf/:type')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get presigned URL for a generated PDF (resume | cover-letter | email)' })
+  async getPdfUrl(
+    @Param('generationId') generationId: string,
+    @Param('type') type: string,
+    @CurrentUser() user: User,
+  ) {
+    const url = await this.generationService.getPdfDownloadUrl(
+      generationId,
+      user.id,
+      type as 'resume' | 'cover-letter' | 'email',
+    );
+    return { url };
+  }
 }
