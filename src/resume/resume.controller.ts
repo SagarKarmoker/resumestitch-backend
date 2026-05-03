@@ -18,7 +18,6 @@ import {
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiConsumes } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { OptionalJwtGuard } from '../auth/guards/optional-jwt.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ResumeService } from './resume.service';
 import { User } from '../generated/prisma';
@@ -32,10 +31,11 @@ export class ResumeController {
   constructor(private readonly resumeService: ResumeService) {}
 
   /**
-   * Parse a PDF resume — works for guests and authenticated users
+   * Parse a PDF resume (authenticated)
    */
   @Post('parse')
-  @UseGuards(OptionalJwtGuard)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @UseInterceptors(FileInterceptor('file'))
   @ApiOperation({ summary: 'Parse a PDF resume and extract text' })
   @ApiConsumes('multipart/form-data')

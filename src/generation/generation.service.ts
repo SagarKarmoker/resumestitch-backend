@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   BadRequestException,
+  ForbiddenException,
   InternalServerErrorException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -10,7 +11,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ResumeService } from '../resume/resume.service';
 import { PdfService } from '../pdf/pdf.service';
 import { StorageService } from '../storage/storage.service';
-import { User, CoverLetterTone } from '../generated/prisma';
+import { User, CoverLetterTone, Tier } from '../generated/prisma';
 import {
   RESUME_SYSTEM_PROMPT,
   COVER_LETTER_SYSTEM_PROMPT,
@@ -32,6 +33,12 @@ export class GenerationService {
   private readonly apiKey: string;
   private readonly baseURL: string;
   private readonly referer: string;
+  private readonly generationMonthlyLimits: Record<Tier, number | null> = {
+    FREE: 1,
+    PRO: 30,
+    CAREER: null,
+    ENTERPRISE: null,
+  };
 
   constructor(
     private readonly config: ConfigService,
@@ -85,7 +92,7 @@ export class GenerationService {
    */
   async generatePackageStream(
     dto: GeneratePackageDto,
-    user: User | null,
+    user: User,
     res: Response,
   ): Promise<void> {
     const { jobDescription, resumeText: rawResumeText, baseResumeId, coverLetterTone } = dto;
@@ -106,6 +113,8 @@ export class GenerationService {
     if (!resumeText || resumeText.trim().length < 50) {
       throw new BadRequestException('Resume text must be at least 50 characters.');
     }
+
+    await this.assertGenerationQuota(user.id, user.tier);
 
     const tone = coverLetterTone || CoverLetterTone.PROFESSIONAL;
 
@@ -147,47 +156,45 @@ export class GenerationService {
 
       // Step 3: Persist generation record
       let generationId: string | null = null;
-      if (user) {
-        const generation = await this.prisma.generation.create({
+      const generation = await this.prisma.generation.create({
+        data: {
+          userId: user.id,
+          baseResumeId: baseResumeId || null,
+          jobDescription,
+          resumeText,
+          companyName: jdAnalysis.companyName,
+          roleTitle: jdAnalysis.roleTitle,
+          seniority: jdAnalysis.seniority,
+          requiredSkills: jdAnalysis.requiredSkills,
+          preferredSkills: jdAnalysis.preferredSkills,
+          tailoredResume: resume || undefined,
+          coverLetter: coverLetter || undefined,
+          applicationEmail: email || undefined,
+          coverLetterTone: tone,
+          atsScore: resume?.atsScore || null,
+          matchedKeywords: resume?.matchedKeywords || [],
+          missingKeywords: resume?.missingKeywords || [],
+          modelUsed: this.defaultModel,
+        },
+      });
+      generationId = generation.id;
+
+      // Auto-create application tracker entry
+      if (jdAnalysis.companyName && jdAnalysis.roleTitle && this.canAccessApplicationTracker(user.tier)) {
+        await this.prisma.application.create({
           data: {
             userId: user.id,
-            baseResumeId: baseResumeId || null,
-            jobDescription,
-            resumeText,
+            generationId: generation.id,
             companyName: jdAnalysis.companyName,
             roleTitle: jdAnalysis.roleTitle,
-            seniority: jdAnalysis.seniority,
-            requiredSkills: jdAnalysis.requiredSkills,
-            preferredSkills: jdAnalysis.preferredSkills,
-            tailoredResume: resume || undefined,
-            coverLetter: coverLetter || undefined,
-            applicationEmail: email || undefined,
-            coverLetterTone: tone,
-            atsScore: resume?.atsScore || null,
-            matchedKeywords: resume?.matchedKeywords || [],
-            missingKeywords: resume?.missingKeywords || [],
-            modelUsed: this.defaultModel,
           },
         });
-        generationId = generation.id;
-
-        // Auto-create application tracker entry
-        if (jdAnalysis.companyName && jdAnalysis.roleTitle) {
-          await this.prisma.application.create({
-            data: {
-              userId: user.id,
-              generationId: generation.id,
-              companyName: jdAnalysis.companyName,
-              roleTitle: jdAnalysis.roleTitle,
-            },
-          });
-        }
-
-        // Generate PDFs asynchronously — does not block SSE response
-        this.generateAndStorePdfs(user.id, generation.id, resume, coverLetter, email).catch(
-          (err) => this.logger.warn('PDF generation failed (non-blocking)', err?.message),
-        );
       }
+
+      // Generate PDFs asynchronously — does not block SSE response
+      this.generateAndStorePdfs(user.id, generation.id, resume, coverLetter, email).catch(
+        (err) => this.logger.warn('PDF generation failed (non-blocking)', err?.message),
+      );
 
       sendEvent('complete', {
         generationId,
@@ -343,6 +350,8 @@ export class GenerationService {
     instruction?: string,
   ): Promise<any> {
     try {
+      await this.assertFeatureTier(userId, 'PRO', 'Section regeneration is available on Pro and above.');
+
       const generation = await this.prisma.generation.findFirst({
         where: { id: generationId, userId },
       });
@@ -395,6 +404,8 @@ export class GenerationService {
 
   async generateInterviewQuestions(generationId: string, userId: string): Promise<any> {
     try {
+      await this.assertFeatureTier(userId, 'CAREER', 'Interview prep is available on Career and above.');
+
       const generation = await this.prisma.generation.findFirst({
         where: { id: generationId, userId },
       });
@@ -417,6 +428,8 @@ export class GenerationService {
 
   async optimizeLinkedIn(generationId: string, userId: string): Promise<any> {
     try {
+      await this.assertFeatureTier(userId, 'CAREER', 'LinkedIn optimizer is available on Career and above.');
+
       const generation = await this.prisma.generation.findFirst({
         where: { id: generationId, userId },
       });
@@ -688,5 +701,53 @@ Return JSON: { "matchedKeywords": [...], "missingKeywords": [...] }`;
 
     this.logger.warn('Failed to parse AI response', text.substring(0, 300));
     throw new InternalServerErrorException('AI returned an unexpected format. Please try again.');
+  }
+
+  private canAccessApplicationTracker(tier: Tier): boolean {
+    return tier === 'CAREER' || tier === 'ENTERPRISE';
+  }
+
+  private async assertGenerationQuota(userId: string, tier: Tier): Promise<void> {
+    const limit = this.generationMonthlyLimits[tier];
+    if (limit === null) return;
+
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const countThisMonth = await this.prisma.generation.count({
+      where: {
+        userId,
+        createdAt: { gte: monthStart },
+      },
+    });
+
+    if (countThisMonth >= limit) {
+      throw new ForbiddenException(
+        `Your ${tier} plan allows ${limit} generation(s) per month. Upgrade to continue generating.`,
+      );
+    }
+  }
+
+  private async assertFeatureTier(
+    userId: string,
+    minimumTier: Tier,
+    message: string,
+  ): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tier: true },
+    });
+    if (!user) throw new BadRequestException('User not found');
+
+    const rank: Record<Tier, number> = {
+      FREE: 0,
+      PRO: 1,
+      CAREER: 2,
+      ENTERPRISE: 3,
+    };
+    if (rank[user.tier] < rank[minimumTier]) {
+      throw new ForbiddenException(message);
+    }
   }
 }

@@ -13,9 +13,7 @@ import {
 import { Response } from 'express';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { OptionalJwtGuard } from '../auth/guards/optional-jwt.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { Public } from '../auth/decorators/public.decorator';
 import { GenerationService } from './generation.service';
 import { User } from '../generated/prisma';
 import { GeneratePackageDto, RegenerateSectionDto, FeedbackDto, JdAnalysisDto, AtsCheckDto } from './dto/generation.dto';
@@ -26,10 +24,11 @@ export class GenerationController {
   constructor(private readonly generationService: GenerationService) {}
 
   /**
-   * Analyze a job description — guest + authenticated
+   * Analyze a job description (authenticated)
    */
   @Post('analyze-jd')
-  @UseGuards(OptionalJwtGuard)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Analyze a job description and extract key information' })
   @HttpCode(HttpStatus.OK)
   async analyzeJd(@Body() body: JdAnalysisDto) {
@@ -38,14 +37,14 @@ export class GenerationController {
 
   /**
    * Generate full application package — streams via SSE
-   * Works for guests (no auth) and authenticated users
    */
   @Post('package/stream')
-  @UseGuards(OptionalJwtGuard)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
   @ApiOperation({ summary: 'Generate a full application package (SSE stream)' })
   async generatePackageStream(
     @Body() dto: GeneratePackageDto,
-    @CurrentUser() user: User | null,
+    @CurrentUser() user: User,
     @Res() res: Response,
   ) {
     await this.generationService.generatePackageStream(dto, user, res);
@@ -122,11 +121,12 @@ export class GenerationController {
   }
 
   /**
-   * ATS checker — completely public, no login required
+   * ATS checker (authenticated)
    */
   @Post('ats-check')
-  @Public()
-  @ApiOperation({ summary: 'Free ATS keyword match checker (no login required)' })
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Run ATS keyword match checker' })
   @HttpCode(HttpStatus.OK)
   async atsCheck(@Body() body: AtsCheckDto) {
     return this.generationService.checkAts(body.jobDescription, body.resumeText);

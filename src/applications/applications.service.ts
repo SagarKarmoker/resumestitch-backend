@@ -7,12 +7,13 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GenerationService } from '../generation/generation.service';
-import { ApplicationStatus, User } from '../generated/prisma';
+import { ApplicationStatus, Tier } from '../generated/prisma';
 import { UpdateApplicationDto } from './dto/applications.dto';
 
 @Injectable()
 export class ApplicationsService {
   private readonly logger = new Logger(ApplicationsService.name);
+  private readonly trackerAllowedTiers: Tier[] = ['CAREER', 'ENTERPRISE'];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -21,6 +22,7 @@ export class ApplicationsService {
 
   async listApplications(userId: string) {
     try {
+      await this.assertTrackerAccess(userId);
       return await this.prisma.application.findMany({
         where: { userId },
         include: {
@@ -43,6 +45,7 @@ export class ApplicationsService {
 
   async getApplication(id: string, userId: string) {
     try {
+      await this.assertTrackerAccess(userId);
       const app = await this.prisma.application.findFirst({
         where: { id, userId },
         include: {
@@ -64,6 +67,7 @@ export class ApplicationsService {
 
   async updateApplication(id: string, userId: string, dto: UpdateApplicationDto) {
     try {
+      await this.assertTrackerAccess(userId);
       await this.getApplication(id, userId);
 
       return await this.prisma.application.update({
@@ -82,6 +86,7 @@ export class ApplicationsService {
 
   async updateStatus(id: string, userId: string, status: ApplicationStatus) {
     try {
+      await this.assertTrackerAccess(userId);
       await this.getApplication(id, userId);
 
       return await this.prisma.application.update({
@@ -97,6 +102,7 @@ export class ApplicationsService {
 
   async deleteApplication(id: string, userId: string) {
     try {
+      await this.assertTrackerAccess(userId);
       await this.getApplication(id, userId);
       await this.prisma.application.delete({ where: { id } });
     } catch (error: any) {
@@ -108,6 +114,7 @@ export class ApplicationsService {
 
   async generateFollowUp(applicationId: string, userId: string) {
     try {
+      await this.assertTrackerAccess(userId);
       await this.getApplication(applicationId, userId);
       return await this.generationService.generateFollowUpEmail(applicationId, userId);
     } catch (error: any) {
@@ -119,6 +126,7 @@ export class ApplicationsService {
 
   async getBoardStats(userId: string) {
     try {
+      await this.assertTrackerAccess(userId);
       const applications = await this.prisma.application.groupBy({
         by: ['status'],
         where: { userId },
@@ -137,6 +145,23 @@ export class ApplicationsService {
     } catch (error: any) {
       this.logger.error('Get board stats failed', error.message);
       throw new InternalServerErrorException('Failed to get board stats. Please try again.');
+    }
+  }
+
+  private async assertTrackerAccess(userId: string): Promise<void> {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { tier: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    if (!this.trackerAllowedTiers.includes(user.tier)) {
+      throw new ForbiddenException(
+        'Application Tracker is available on Career and Enterprise plans.',
+      );
     }
   }
 }
